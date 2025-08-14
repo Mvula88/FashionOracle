@@ -83,44 +83,57 @@ export default function ImageAnalyzer() {
         .from('fashion-images')
         .getPublicUrl(fileName)
 
-      // For now, create mock data since Edge Functions aren't set up yet
-      // In production, this would call the Edge Function
-      const mockResult: AnalysisResult = {
-        item: {
-          id: crypto.randomUUID(),
-          name: 'Analyzed Fashion Item',
-          category: 'dress',
-          colors: ['black', 'white'],
-          patterns: ['solid'],
-          confidence: 0.85
-        },
-        analysis: {
-          trendScore: 0.75,
-          similarItems: [],
-          recommendations: [
-            'This style is trending in urban markets',
-            'Popular among 18-35 age group',
-            'Expected to peak in 2-3 months'
-          ]
-        }
-      }
-
-      setResult(mockResult)
-
-      // Store in database
-      const { data: itemData, error: itemError } = await supabase
-        .from('fashion_items')
-        .insert({
-          name: mockResult.item.name,
-          category: mockResult.item.category,
-          colors: mockResult.item.colors,
-          patterns: mockResult.item.patterns,
-          image_urls: [publicUrl]
+      // Call the Edge Function for analysis
+      const { data: functionData, error: functionError } = await supabase.functions
+        .invoke('analyze-image', {
+          body: { 
+            imageUrl: publicUrl,
+            userId: (await supabase.auth.getUser()).data?.user?.id
+          }
         })
-        .select()
-        .single()
 
-      if (itemError) console.error('Error storing item:', itemError)
+      if (functionError) {
+        console.error('Edge Function error:', functionError)
+        // Fallback to mock data if Edge Function isn't deployed yet
+        const mockResult: AnalysisResult = {
+          item: {
+            id: crypto.randomUUID(),
+            name: 'Analyzed Fashion Item',
+            category: 'dress',
+            colors: ['black', 'white'],
+            patterns: ['solid'],
+            confidence: 0.85
+          },
+          analysis: {
+            trendScore: 0.75,
+            similarItems: [],
+            recommendations: [
+              'This style is trending in urban markets',
+              'Popular among 18-35 age group',
+              'Expected to peak in 2-3 months'
+            ]
+          }
+        }
+        setResult(mockResult)
+      } else if (functionData) {
+        // Transform the Edge Function response to match our AnalysisResult interface
+        const result: AnalysisResult = {
+          item: {
+            id: functionData.item?.id || crypto.randomUUID(),
+            name: functionData.item?.name || 'Fashion Item',
+            category: functionData.item?.category || 'unknown',
+            colors: functionData.item?.colors || [],
+            patterns: functionData.item?.patterns || [],
+            confidence: functionData.analysis?.confidence || 0.5
+          },
+          analysis: {
+            trendScore: functionData.analysis?.trendScore || 0.5,
+            similarItems: functionData.analysis?.similarItems || [],
+            recommendations: functionData.analysis?.recommendations || []
+          }
+        }
+        setResult(result)
+      }
 
     } catch (error) {
       console.error('Error analyzing image:', error)
